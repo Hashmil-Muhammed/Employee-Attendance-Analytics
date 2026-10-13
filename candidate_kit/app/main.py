@@ -8,7 +8,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
@@ -145,7 +145,7 @@ class EmployeeIn(BaseModel):
     department: str = Field(min_length=1, max_length=50)
     shift_start: str = Field(default="09:30", pattern=r'^([01]\d|2[0-3]):[0-5]\d$')
     shift_end: str = Field(default="18:30", pattern=r'^([01]\d|2[0-3]):[0-5]\d$')
-    joined_on: str
+    joined_on: str = Field(pattern=r'^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$')
     
     @field_validator('shift_end')
     def shift_times_must_differ(cls, v, info):
@@ -193,6 +193,10 @@ class RegularizeIn(BaseModel):
 # --------------------------------------------------------------------------- #
 # Endpoints
 # --------------------------------------------------------------------------- #
+@app.get("/")
+def root():
+    return {"message": "HROne Employee Attendance & Analytics API", "docs": "/docs", "health": "/health"}
+
 @app.get("/health")
 def health():
     try:
@@ -213,7 +217,11 @@ def create_employee(body: EmployeeIn):
     return format_employee(doc)
 
 @app.get("/employees")
-def list_employees(department: Optional[str] = None, page: int = 1, page_size: int = 20):
+def list_employees(
+    department: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100)
+):
     q = {}
     if department:
         q["department"] = department
@@ -303,11 +311,11 @@ def punch_out(body: PunchOutIn):
 @app.get("/attendance")
 def list_attendance(
     emp_code: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    status: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 20,
+    date_from: Optional[str] = Query(None, pattern=r'^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$'),
+    date_to: Optional[str] = Query(None, pattern=r'^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$'),
+    status: Optional[str] = Query(None, pattern=r'^(PRESENT|ABSENT|LEAVE|WFH|ON_DUTY)$'),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
 ):
     if date_from and date_to and date_from > date_to:
         raise HTTPException(422, "date_from > date_to")
@@ -771,7 +779,7 @@ def build_department_trend_pipeline(department: str, from_date: str, to_date: st
     return [
         {"$match": {"department": department}},
         {"$limit": 1},
-        {"$project": {"_id": 0, "dummy": {"$literal": 1}}},
+        {"$project": {"_id": 0, "date_dt": {"$literal": from_date_dt}}},
         {
             "$densify": {
                 "field": "date_dt",
@@ -893,7 +901,11 @@ def build_department_trend_pipeline(department: str, from_date: str, to_date: st
     ]
 
 @app.get("/analytics/departments/{department}/trend")
-def department_trend(department: str, from_: str = Query(..., alias="from"), to: str = Query(...)):
+def department_trend(
+    department: str,
+    from_: str = Query(..., alias="from", pattern=r'^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$'),
+    to: str = Query(..., pattern=r'^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$')
+):
     if to < from_:
         raise HTTPException(422, "to < from")
         
@@ -945,8 +957,8 @@ def explain_endpoint(
     status: Optional[str] = None,
     from_: Optional[str] = Query(None, alias="from"),
     to: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
 ):
     if endpoint not in ["attendance_list", "employee_monthly", "department_summary", "late_leaderboard", "department_trend"]:
         raise HTTPException(422, "Invalid endpoint")

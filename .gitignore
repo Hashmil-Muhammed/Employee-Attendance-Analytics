@@ -1,5 +1,17 @@
-.venv/
-__pycache__/
+# Environments & Secrets
 .env
+.env.*
+.venv/
+venv/
+env/
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
 .pytest_cache/
-*.pyc
+
+# Git metadata backups & standalone markers
+.git_backups/
+.git_standalone/
+*.bak
